@@ -5,6 +5,7 @@ import os
 import random
 pygame.font.init()
 
+GEN = 0
 WIN_WIDTH = 500
 WIN_HEIGHT = 800
 
@@ -162,7 +163,7 @@ class Base:
         win.blit(self.IMG, (self.x2, self.y))
 
 
-def draw_window(win, bird, pipes, base, score):
+def draw_window(win, birds, pipes, base, score, gen):
     win.blit(BG_IMG, (0, 0))
 
     for pipe in pipes:
@@ -170,13 +171,33 @@ def draw_window(win, bird, pipes, base, score):
 
     text = STAT_FONT.render('Score: ' + str(score), 1, (255, 255, 255))
     win.blit(text, (WIN_WIDTH - 10 - text.get_width(), 10))
+
+    text = STAT_FONT.render('Gen: ' + str(gen), 1, (255, 255, 255))
+    win.blit(text, (10, 10))
+
     base.draw(win)
-    bird.draw(win)
+
+    for bird in birds:
+        bird.draw(win)
     pygame.display.update()
 
 
-def main():
-    bird = Bird(230, 350)
+# Fitness Function
+def main(genomes, config):
+    global GEN
+    GEN += 1
+    neural_nets = []  # Neural Network for each bird
+    ge = []  # Genome tracker
+    birds = []
+
+    # genomes is a list of tuples that has (id, genome obj)
+    for _, g in genomes:
+        net = neat.nn.FeedForwardNetwork.create(g, config)
+        neural_nets.append(net)
+        birds.append(Bird(230, 350))
+        g.fitness = 0
+        ge.append(g)
+
     base = Base(730)
     pipes = [Pipe(600)]
     win = pygame.display.set_mode((WIN_WIDTH, WIN_HEIGHT))
@@ -190,38 +211,96 @@ def main():
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 run = False
+                pygame.quit()
+                quit()
 
-        # bird.move()
+        # Find out which pipe is coming next
+        pipe_index = 0
+        if len(birds) > 0:
+            if len(pipes) > 1 and birds[0].x > pipes[0].x + pipes[0].PIPE_TOP.get_width():
+                pipe_index = 1
+        else:
+            # If all birds of current generation are dead then restart game
+            break
+
+        for x, bird in enumerate(birds):
+            bird.move()
+            ge[x].fitness += 0.1  # Encourage bird to keep going
+
+            output = neural_nets[x].activate((bird.y, abs(bird.y - pipes[pipe_index].height), abs(bird.y - pipes[pipe_index].bottom)))
+
+            # Decide whether to jump or not with the output neuron
+            if output[0] > 0.5:
+                bird.jump()
+
         add_pipe = False
         to_remove = []
         for pipe in pipes:
-            if pipe.collide(bird):
-                pass
+            for x, bird in enumerate(birds):
+                if pipe.collide(bird):
+                    # If a bird hits a pipe then reduce fitness
+                    # ge[x].fitness -= 1
+                    birds.pop(x)
+                    neural_nets.pop(x)
+                    ge.pop(x)
+
+                if not pipe.passed and pipe.x < bird.x:
+                    pipe.passed = True
+                    add_pipe = True
 
             if pipe.x + pipe.PIPE_TOP.get_width() < 0:
                 to_remove.append(pipe)
-
-            if not pipe.passed and pipe.x < bird.x:
-                pipe.passed = True
-                add_pipe = True
 
             pipe.move()
 
         if add_pipe:
             score += 1
+            for g in ge:
+                # If bird passes through pipe then increase fitness score by 5
+                g.fitness += 5
             pipes.append(Pipe(600))
 
         for pipe in to_remove:
             pipes.remove(pipe)
 
-        if bird.y + bird.img.get_height() >= 730:
-            pass
+        for x, bird in enumerate(birds):
+            if bird.y + bird.img.get_height() >= 730 or bird.y < 0:
+                birds.pop(x)
+                neural_nets.pop(x)
+                ge.pop(x)
 
         base.move()
-        draw_window(win, bird, pipes, base, score)
-
-    pygame.quit()
-    quit()
+        draw_window(win, birds, pipes, base, score, GEN)
 
 
-main()
+'''
+Neural Network Setup:
+- Inputs: Bird Y, Top Pipe, Bottom Pipe
+- Outputs: Jump or not
+- Activation Function: tanh
+- Population Size (To start with): 20 
+- Fitness Function: How far the bird goes 
+- Max generations: 30
+'''
+
+
+def run(config_path):
+    config = neat.config.Config(neat.DefaultGenome, neat.DefaultReproduction,
+                                neat.DefaultSpeciesSet, neat.DefaultStagnation,
+                                config_path)
+
+    # Create a population
+    pop = neat.Population(config)
+
+    pop.add_reporter(neat.StdOutReporter(True))
+    stats = neat.StatisticsReporter()
+    pop.add_reporter(stats)
+
+    # We run the fitness function for 50 generations
+    winner = pop.run(main, 50)
+
+
+if __name__ == '__main__':
+    local_dir = os.path.dirname(__file__)
+    config_path = os.path.join(local_dir, 'config.txt')
+    run(config_path)
