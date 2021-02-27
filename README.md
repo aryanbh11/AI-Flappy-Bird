@@ -7,7 +7,11 @@ Created the popular game Flappy Bird using pygame and then implemented the NEAT 
 pygame, neat 
 
 ## How to run? 
-Simply run the **flappy_bird.py** file using the command `python3 flappy_bird.py`
+Clone this project and then from the project directory run the following commands:
+```
+>> pip install -r requirements.txt
+>> python3 flappy_bird.py
+```
 
 ## How it works?
 Neural Network Setup:
